@@ -325,6 +325,79 @@ def _log_debug_block(block_name: str, raw_text: str) -> None:
     log(f"[DEBUG BLOCK] {block_name}: {raw_text[:250]}", level="debug")
 
 
+
+
+def _u16le_regs_from_modbus_block(raw: bytes) -> list:
+    """
+    Decode block like:
+    05 03 <byte_count> <register bytes...> <crc_lo> <crc_hi>
+
+    Registers from this inverter appear to be little-endian.
+    """
+    if not raw or len(raw) < 5:
+        return []
+
+    if raw[1] != 0x03:
+        return []
+
+    byte_count = raw[2]
+    data = raw[3:3 + byte_count]
+
+    if len(data) < byte_count:
+        return []
+
+    regs = []
+    for i in range(0, len(data), 2):
+        if i + 1 < len(data):
+            regs.append(int.from_bytes(data[i:i + 2], "little"))
+
+    return regs
+
+
+def _quick_decode_ps4z_state(blocks: dict) -> dict:
+    """
+    Quick decoder for PS4Z block from this user's inverter.
+    This gives the main useful sensors first.
+    """
+    raw = blocks.get("PS4Z")
+    if not raw:
+        return {}
+
+    r = _u16le_regs_from_modbus_block(raw)
+    if len(r) < 15:
+        return {}
+
+    out = {}
+
+    def set_if_ok(key, value, min_v=None, max_v=None):
+        if value is None:
+            return
+        if min_v is not None and value < min_v:
+            return
+        if max_v is not None and value > max_v:
+            return
+        out[key] = value
+
+    # Mapping from observed PS4Z block.
+    # Verify once against the inverter LCD/app.
+    set_if_ok("grid_v", round(r[1] / 10, 1), 80, 300)
+    set_if_ok("grid_hz", round(r[2] / 10, 1), 40, 70)
+
+    set_if_ok("bat_v", round(r[5] / 10, 1), 10, 80)
+    set_if_ok("bat_cap", r[6], 0, 100)
+
+    set_if_ok("out_v", round(r[9] / 10, 1), 80, 300)
+    set_if_ok("out_hz", round(r[10] / 10, 1), 40, 70)
+
+    set_if_ok("apparent_va", round(r[11] / 10, 1), 0, 20000)
+    set_if_ok("load_w", round(r[12] / 10, 1), 0, 20000)
+    set_if_ok("load_pct", r[13], 0, 200)
+
+    set_if_ok("inverter_temperature_c", r[14], -20, 120)
+
+    return out
+
+
 class SolarParser:
     @staticmethod
     def _to_float_or_none(value: object) -> Optional[float]:
@@ -1427,6 +1500,12 @@ class SolarParser:
                 log_payload_preview("[UNPARSED PAYLOAD: NO BLOCKS]", payload_bytes, topic=source_topic)
 
             state = SolarParser._try_ascii_schema(blocks)
+            quick_state = _quick_decode_ps4z_state(blocks)
+            if quick_state:
+                if state:
+                    state.update(quick_state)
+                else:
+                    state = quick_state
             if state:
                 clean_state = SolarParser._drop_none_values(state)
                 if not clean_state:
