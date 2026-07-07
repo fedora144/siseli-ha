@@ -385,15 +385,16 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
     set_if_ok("bat_v", round(r[5] / 10, 1), 10, 80)
     set_if_ok("bat_cap", r[6], 0, 100)
-    set_if_ok("dischg_current", round(r[8] / 10, 1), 0, 500)
+    set_if_ok("dischg_current", r[8], 0, 500)
+    set_if_ok("c_battery_discharge_power_w", round((r[5] / 10) * r[8], 1), 0, 30000)
 
     set_if_ok("out_v", round(r[9] / 10, 1), 80, 300)
     set_if_ok("out_hz", round(r[10] / 10, 1), 40, 70)
 
-    set_if_ok("apparent_va", round(r[11] / 10, 1), 0, 20000)
-    set_if_ok("load_w", round(r[12] / 10, 1), 0, 20000)
+    set_if_ok("apparent_va", r[11], 0, 20000)
+    set_if_ok("load_w", r[12], 0, 20000)
     set_if_ok("load_pct", r[13], 0, 200)
-    set_if_ok("c_load_w", round(r[12] / 10, 1), 0, 20000)
+    set_if_ok("c_load_w", r[12], 0, 20000)
     set_if_ok("bus_voltage", r[16], 0, 1000)
 
     sgx0_raw = blocks.get("Sgx0")
