@@ -385,6 +385,7 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
     set_if_ok("bat_v", round(r[5] / 10, 1), 10, 80)
     set_if_ok("bat_cap", r[6], 0, 100)
+    set_if_ok("dischg_current", round(r[8] / 10, 1), 0, 500)
 
     set_if_ok("out_v", round(r[9] / 10, 1), 80, 300)
     set_if_ok("out_hz", round(r[10] / 10, 1), 40, 70)
@@ -392,8 +393,17 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
     set_if_ok("apparent_va", round(r[11] / 10, 1), 0, 20000)
     set_if_ok("load_w", round(r[12] / 10, 1), 0, 20000)
     set_if_ok("load_pct", r[13], 0, 200)
+    set_if_ok("c_load_w", round(r[12] / 10, 1), 0, 20000)
+    set_if_ok("bus_voltage", r[16], 0, 1000)
 
-    set_if_ok("inverter_temperature_c", r[14], -20, 120)
+    sgx0_raw = blocks.get("Sgx0")
+    if sgx0_raw:
+        s = _u16le_regs_from_modbus_block(sgx0_raw)
+        if len(s) > 12:
+            set_if_ok("max_chg", s[5], 0, 300)
+            set_if_ok("bulk_v", round(s[10] / 10, 1), 10, 80)
+            set_if_ok("float_v", round(s[11] / 10, 1), 10, 80)
+            set_if_ok("cut_v", round(s[12] / 10, 1), 10, 80)
 
     return out
 
