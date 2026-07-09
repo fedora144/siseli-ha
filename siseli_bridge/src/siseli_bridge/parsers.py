@@ -382,9 +382,39 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
     # Verify once against the inverter LCD/app.
     set_if_ok("grid_v", round(r[1] / 10, 1), 80, 300)
     set_if_ok("grid_hz", round(r[2] / 10, 1), 40, 70)
+    # PS4Z_V6B_COMBINED_PV_CHARGE: PV1 from PS4Z r[3]=Vx10, r[4]=Ax100
+    if len(r) > 4:
+        pv1_v = round(r[3] / 10, 1)
+        pv1_current = round(r[4] / 100, 2)
+        pv1_w = round(pv1_v * pv1_current, 1)
+
+        set_if_ok("pv_v", pv1_v, 0, 600)
+        set_if_ok("pv_current_a", pv1_current, 0, 200)
+        set_if_ok("pv_w", pv1_w, 0, 30000)
+
 
     set_if_ok("bat_v", round(r[5] / 10, 1), 10, 80)
     set_if_ok("bat_cap", r[6], 0, 100)
+    # PS4Z_V6B_COMBINED_PV_CHARGE: charge/discharge from PS4Z r[7]/r[8]
+    if len(r) > 8:
+        charge_current = r[7]
+        discharge_current = r[8]
+        set_if_ok("bat_charge_current", charge_current, 0, 500)
+        set_if_ok("dischg_current", discharge_current, 0, 500)
+
+        if charge_current > 0:
+            set_if_ok("c_battery_charge_power_w", round((r[5] / 10) * charge_current, 1), 0, 30000)
+            set_if_ok("c_battery_discharge_power_w", 0, 0, 30000)
+            out["battery_status"] = "Charging"
+        elif discharge_current > 0:
+            set_if_ok("c_battery_charge_power_w", 0, 0, 30000)
+            set_if_ok("c_battery_discharge_power_w", round((r[5] / 10) * discharge_current, 1), 0, 30000)
+            out["battery_status"] = "Discharge"
+        else:
+            set_if_ok("c_battery_charge_power_w", 0, 0, 30000)
+            set_if_ok("c_battery_discharge_power_w", 0, 0, 30000)
+            out["battery_status"] = "Idle"
+
     set_if_ok("dischg_current", r[8], 0, 500)
     set_if_ok("c_battery_discharge_power_w", round((r[5] / 10) * r[8], 1), 0, 30000)
 
@@ -405,6 +435,22 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
             set_if_ok("bulk_v", round(s[10] / 10, 1), 10, 80)
             set_if_ok("float_v", round(s[11] / 10, 1), 10, 80)
             set_if_ok("cut_v", round(s[12] / 10, 1), 10, 80)
+            # PS4Z_V6B_COMBINED_PV_CHARGE: PV2 from Sgx0 r[27]=Vx10, r[28]=W
+            if len(r) > 28:
+                pv2_v = round(r[27] / 10, 1)
+                pv2_w = r[28]
+                pv2_current = round(pv2_w / pv2_v, 2) if pv2_v > 0 else 0
+
+                set_if_ok("pv2_v", pv2_v, 0, 600)
+                set_if_ok("pv2_current_a", pv2_current, 0, 200)
+                set_if_ok("pv2_power_w", pv2_w, 0, 30000)
+
+                pv1_w_now = float(out.get("pv_w") or 0)
+                total_pv_w = round(pv1_w_now + float(pv2_w or 0), 1)
+
+                set_if_ok("generation_power_w", total_pv_w, 0, 60000)
+                set_if_ok("c_generation_power_w", total_pv_w, 0, 60000)
+
 
     return out
 
