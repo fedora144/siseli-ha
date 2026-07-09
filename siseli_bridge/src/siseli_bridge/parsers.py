@@ -382,6 +382,16 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
     # Verify once against the inverter LCD/app.
     set_if_ok("grid_v", round(r[1] / 10, 1), 80, 300)
     set_if_ok("grid_hz", round(r[2] / 10, 1), 40, 70)
+    # PS4Z_V7_SWAP_PV1_PV2: PV2 from PS4Z r[3]=Vx10, r[4]=Ax100
+    if len(r) > 4:
+        ps4z_pv_v = round(r[3] / 10, 1)
+        ps4z_pv_current = round(r[4] / 100, 2)
+        ps4z_pv_w = round(ps4z_pv_v * ps4z_pv_current, 1)
+
+        set_if_ok("pv2_v", ps4z_pv_v, 0, 600)
+        set_if_ok("pv2_current_a", ps4z_pv_current, 0, 200)
+        set_if_ok("pv2_power_w", ps4z_pv_w, 0, 30000)
+
     # PS4Z_V6B_COMBINED_PV_CHARGE: PV1 from PS4Z r[3]=Vx10, r[4]=Ax100
     if len(r) > 4:
         pv1_v = round(r[3] / 10, 1)
@@ -435,6 +445,23 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
             set_if_ok("bulk_v", round(s[10] / 10, 1), 10, 80)
             set_if_ok("float_v", round(s[11] / 10, 1), 10, 80)
             set_if_ok("cut_v", round(s[12] / 10, 1), 10, 80)
+            # PS4Z_V7_SWAP_PV1_PV2: PV1 from Sgx0 r[27]=Vx10, r[28]=W
+            if len(r) > 28:
+                sgx0_pv_v = round(r[27] / 10, 1)
+                sgx0_pv_w = r[28]
+                sgx0_pv_current = round(sgx0_pv_w / sgx0_pv_v, 2) if sgx0_pv_v > 0 else 0
+
+                set_if_ok("pv_v", sgx0_pv_v, 0, 600)
+                set_if_ok("pv_current_a", sgx0_pv_current, 0, 200)
+                set_if_ok("pv_w", sgx0_pv_w, 0, 30000)
+
+                pv1_w_now = float(sgx0_pv_w or 0)
+                pv2_w_now = float(out.get("pv2_power_w") or 0)
+                total_pv_w = round(pv1_w_now + pv2_w_now, 1)
+
+                set_if_ok("generation_power_w", total_pv_w, 0, 60000)
+                set_if_ok("c_generation_power_w", total_pv_w, 0, 60000)
+
             # PS4Z_V6B_COMBINED_PV_CHARGE: PV2 from Sgx0 r[27]=Vx10, r[28]=W
             if len(r) > 28:
                 pv2_v = round(r[27] / 10, 1)
