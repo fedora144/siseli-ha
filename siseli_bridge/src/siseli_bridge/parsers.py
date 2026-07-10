@@ -499,6 +499,88 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
                 set_if_ok("c_generation_power_w", total_pv_w, 0, 60000)
 
 
+
+    # PS4Z_V9_GRID_IMPORT_FALLBACK: calculate grid import when inverter does not provide it directly
+
+
+    try:
+
+
+        load_w_now = float(out.get("load_w") or out.get("c_load_w") or 0)
+
+
+        pv_w_now = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
+
+
+        batt_charge_w_now = float(out.get("c_battery_charge_power_w") or 0)
+
+
+        batt_discharge_w_now = float(out.get("c_battery_discharge_power_w") or 0)
+
+
+        direct_grid_w = float(out.get("c_grid_import_power_w") or 0)
+
+
+
+        calc_grid_w = load_w_now + batt_charge_w_now - pv_w_now - batt_discharge_w_now
+
+
+        calc_grid_w = round(max(calc_grid_w, 0), 1)
+
+
+
+        if direct_grid_w <= 0 and calc_grid_w > 0:
+
+
+            set_if_ok("c_grid_import_power_w", calc_grid_w, 0, 60000)
+
+
+            set_if_ok("mains_power_w", calc_grid_w, 0, 60000)
+
+
+            set_if_ok("c_mains_power_w", calc_grid_w, 0, 60000)
+
+
+            out["mains_flow_state"] = "Import"
+
+
+            out["mains_current_flow_direction"] = "Import"
+
+
+        elif direct_grid_w > 0:
+
+
+            set_if_ok("mains_power_w", direct_grid_w, 0, 60000)
+
+
+            set_if_ok("c_mains_power_w", direct_grid_w, 0, 60000)
+
+
+            out["mains_flow_state"] = "Import"
+
+
+            out["mains_current_flow_direction"] = "Import"
+
+
+        else:
+
+
+            set_if_ok("c_grid_import_power_w", 0, 0, 60000)
+
+
+            set_if_ok("mains_power_w", 0, 0, 60000)
+
+
+            set_if_ok("c_mains_power_w", 0, 0, 60000)
+
+
+    except Exception:
+
+
+        pass
+
+
+
     return out
 
 
