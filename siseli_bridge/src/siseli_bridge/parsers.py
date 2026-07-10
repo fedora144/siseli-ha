@@ -400,9 +400,9 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
         set_if_ok("c_battery_discharge_power_w", round(bat_v_now * dis_a, 1), 0, 30000)
         out["battery_status"] = "Charging" if chg_a > 0 else ("Discharge" if dis_a > 0 else "Idle")
 
-        set_if_ok("pv2_v", ps4z_pv_v, 0, 600)
-        set_if_ok("pv2_current_a", ps4z_pv_current, 0, 200)
-        set_if_ok("pv2_power_w", ps4z_pv_w, 0, 30000)
+        set_if_ok("pv2_v", pv1_v, 0, 600)
+        set_if_ok("pv2_current_a", pv1_current, 0, 200)
+        set_if_ok("pv2_power_w", pv1_w, 0, 30000)
 
     # PS4Z_V6B_COMBINED_PV_CHARGE: PV1 from PS4Z r[3]=Vx10, r[4]=Ax100
     if len(r) > 4:
@@ -471,11 +471,11 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
                 set_if_ok("generation_power_w", total_pv_w, 0, 60000)
                 set_if_ok("c_generation_power_w", total_pv_w, 0, 60000)
 
-                set_if_ok("pv_v", sgx0_pv_v, 0, 600)
-                set_if_ok("pv_current_a", sgx0_pv_current, 0, 200)
-                set_if_ok("pv_w", sgx0_pv_w, 0, 30000)
+                set_if_ok("pv_v", pv2_v, 0, 600)
+                set_if_ok("pv_current_a", pv2_current, 0, 200)
+                set_if_ok("pv_w", pv2_w, 0, 30000)
 
-                pv1_w_now = float(sgx0_pv_w or 0)
+                pv1_w_now = float(pv2_w or 0)
                 pv2_w_now = float(out.get("pv2_power_w") or 0)
                 total_pv_w = round(pv1_w_now + pv2_w_now, 1)
 
