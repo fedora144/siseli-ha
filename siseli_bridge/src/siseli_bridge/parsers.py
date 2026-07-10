@@ -382,11 +382,23 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
     # Verify once against the inverter LCD/app.
     set_if_ok("grid_v", round(r[1] / 10, 1), 80, 300)
     set_if_ok("grid_hz", round(r[2] / 10, 1), 40, 70)
-    # PS4Z_V7_SWAP_PV1_PV2: PV2 from PS4Z r[3]=Vx10, r[4]=Ax100
-    if len(r) > 4:
-        ps4z_pv_v = round(r[3] / 10, 1)
-        ps4z_pv_current = round(r[4] / 100, 2)
-        ps4z_pv_w = round(ps4z_pv_v * ps4z_pv_current, 1)
+    # PS4Z_V8B_PV1_PV2_POWER_FIXED: PV1 from PS4Z and battery current
+    # r[3] = PV1 voltage x10, r[4] = PV1 power W
+    if len(r) > 8:
+        pv1_v = round(r[3] / 10, 1)
+        pv1_w = float(r[4])
+        pv1_current = round(pv1_w / pv1_v, 2) if pv1_v > 0 else 0
+        set_if_ok("pv_v", pv1_v, 0, 600)
+        set_if_ok("pv_w", pv1_w, 0, 10000)
+        set_if_ok("pv_current_a", pv1_current, 0, 200)
+        bat_v_now = float(out.get("bat_v") or (r[5] / 10 if len(r) > 5 else 0))
+        chg_a = float(r[7])
+        dis_a = float(r[8])
+        set_if_ok("bat_charge_current", chg_a, 0, 300)
+        set_if_ok("dischg_current", dis_a, 0, 300)
+        set_if_ok("c_battery_charge_power_w", round(bat_v_now * chg_a, 1), 0, 30000)
+        set_if_ok("c_battery_discharge_power_w", round(bat_v_now * dis_a, 1), 0, 30000)
+        out["battery_status"] = "Charging" if chg_a > 0 else ("Discharge" if dis_a > 0 else "Idle")
 
         set_if_ok("pv2_v", ps4z_pv_v, 0, 600)
         set_if_ok("pv2_current_a", ps4z_pv_current, 0, 200)
@@ -445,11 +457,19 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
             set_if_ok("bulk_v", round(s[10] / 10, 1), 10, 80)
             set_if_ok("float_v", round(s[11] / 10, 1), 10, 80)
             set_if_ok("cut_v", round(s[12] / 10, 1), 10, 80)
-            # PS4Z_V7_SWAP_PV1_PV2: PV1 from Sgx0 r[27]=Vx10, r[28]=W
+            # PS4Z_V8B_PV1_PV2_POWER_FIXED: PV2 from Sgx0 and total generation
+            # r[27] = PV2 voltage x10, r[28] = PV2 power W
             if len(r) > 28:
-                sgx0_pv_v = round(r[27] / 10, 1)
-                sgx0_pv_w = r[28]
-                sgx0_pv_current = round(sgx0_pv_w / sgx0_pv_v, 2) if sgx0_pv_v > 0 else 0
+                pv2_v = round(r[27] / 10, 1)
+                pv2_w = float(r[28])
+                pv2_current = round(pv2_w / pv2_v, 2) if pv2_v > 0 else 0
+                set_if_ok("pv2_v", pv2_v, 0, 600)
+                set_if_ok("pv2_power_w", pv2_w, 0, 30000)
+                set_if_ok("pv2_current_a", pv2_current, 0, 200)
+                pv1_w_now = float(out.get("pv_w") or 0)
+                total_pv_w = round(pv1_w_now + pv2_w, 1)
+                set_if_ok("generation_power_w", total_pv_w, 0, 60000)
+                set_if_ok("c_generation_power_w", total_pv_w, 0, 60000)
 
                 set_if_ok("pv_v", sgx0_pv_v, 0, 600)
                 set_if_ok("pv_current_a", sgx0_pv_current, 0, 200)
