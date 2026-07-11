@@ -1,6 +1,6 @@
 ﻿name: 'Siseli Inverter Bridge PS4Z'
 description: 'Local bridge for Siseli-compatible inverters with MQTT discovery for Home Assistant.'
-version: '2.5.43'
+version: '2.5.44'
 slug: 'siseli_bridge_ps4z'
 url: 'https://github.com/fedora144/siseli-ha/blob/main/README.md'
 init: false
