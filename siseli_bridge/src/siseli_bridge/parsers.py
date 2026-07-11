@@ -2511,6 +2511,454 @@ class SolarParser:
                             log_kv("[STATE CHANGE]", key=key, old=None if old_val == "__missing__" else old_val, new=new_val)
 
                 if LOG_CLEAN_STATE:
+                    try:
+                        import base64 as _v19_b64
+                        import json as _v19_json
+                    
+                        def _v19_regs_le(_co):
+                            if not _co:
+                                return []
+                            _raw = _v19_b64.b64decode(_co)
+                            if len(_raw) < 5:
+                                return []
+                            if _raw[1] == 0x03:
+                                _bc = _raw[2]
+                                _data = _raw[3:3 + _bc]
+                            else:
+                                _data = _raw[3:-2]
+                            _regs = []
+                            for _i in range(0, len(_data) - 1, 2):
+                                _regs.append(_data[_i] | (_data[_i + 1] << 8))
+                            return _regs
+                    
+                        def _v19_collect_blocks(_v, _depth=0):
+                            if _depth > 4:
+                                return {}
+                            _found = {}
+                    
+                            if isinstance(_v, dict):
+                                if isinstance(_v.get("cn"), str) and isinstance(_v.get("co"), str):
+                                    _found[_v.get("cn")] = _v.get("co")
+                    
+                                _b = _v.get("b")
+                                if isinstance(_b, dict) and isinstance(_b.get("ct"), list):
+                                    for _it in _b.get("ct"):
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                                _ct = _v.get("ct")
+                                if isinstance(_ct, list):
+                                    for _it in _ct:
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                                for _k, _val in _v.items():
+                                    if _k in ("PS4Z", "Sgx0", "hIg6", "zsui") and isinstance(_val, str):
+                                        _found[_k] = _val
+                                    elif isinstance(_val, (dict, list, tuple)) and _depth < 3:
+                                        _found.update(_v19_collect_blocks(_val, _depth + 1))
+                    
+                            elif isinstance(_v, (list, tuple)):
+                                if len(_v) == 2 and isinstance(_v[0], str) and isinstance(_v[1], str):
+                                    if _v[0] in ("PS4Z", "Sgx0", "hIg6", "zsui"):
+                                        _found[_v[0]] = _v[1]
+                                for _it in _v:
+                                    if isinstance(_it, (dict, list, tuple)) and _depth < 3:
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                            elif isinstance(_v, (str, bytes, bytearray)):
+                                if isinstance(_v, (bytes, bytearray)):
+                                    _s = _v.decode("utf-8", "ignore")
+                                else:
+                                    _s = _v
+                    
+                                if '"ct"' in _s and '"co"' in _s:
+                                    _pos = _s.find("{")
+                                    while _pos >= 0:
+                                        try:
+                                            _obj, _end = _v19_json.JSONDecoder().raw_decode(_s[_pos:])
+                                            _found.update(_v19_collect_blocks(_obj, _depth + 1))
+                                            break
+                                        except Exception:
+                                            _pos = _s.find("{", _pos + 1)
+                    
+                            return _found
+                    
+                        # Find the dict that is going to be printed/published as CLEAN STATE
+                        _target = None
+                        for _name, _val in list(locals().items()):
+                            if isinstance(_val, dict):
+                                _keys = set(_val.keys())
+                                if (
+                                    "c_grid_import_power_w" in _keys
+                                    and ("pv_w" in _keys or "generation_power_w" in _keys)
+                                    and ("load_w" in _keys or "c_load_w" in _keys)
+                                ):
+                                    _target = _val
+                                    break
+                    
+                        if _target is not None:
+                            _blocks = {}
+                            for _name, _val in list(locals().items()):
+                                _blocks.update(_v19_collect_blocks(_val))
+                    
+                            _ps4z = _v19_regs_le(_blocks.get("PS4Z"))
+                            _sgx0 = _v19_regs_le(_blocks.get("Sgx0"))
+                    
+                            # Confirmed app mapping:
+                            # PV1 Power = PS4Z r[4]
+                            # PV2 Power = Sgx0 r[28]
+                            if len(_ps4z) > 4:
+                                _pv1_v = round(float(_ps4z[3]) / 10.0, 1)
+                                _pv1_w = float(_ps4z[4])
+                                if 0 <= _pv1_v <= 600 and 0 <= _pv1_w <= 10000:
+                                    _target["pv_v"] = _pv1_v
+                                    _target["pv_w"] = round(_pv1_w, 1)
+                                    _target["pv_current_a"] = round(_pv1_w / _pv1_v, 2) if _pv1_v > 0 else 0
+                    
+                            if len(_sgx0) > 28:
+                                _pv2_v = round(float(_sgx0[27]) / 10.0, 1)
+                                _pv2_w = float(_sgx0[28])
+                                if 0 <= _pv2_v <= 600 and 0 <= _pv2_w <= 10000:
+                                    _target["pv2_v"] = _pv2_v
+                                    _target["pv2_power_w"] = round(_pv2_w, 1)
+                                    _target["pv2_current_a"] = round(_pv2_w / _pv2_v, 2) if _pv2_v > 0 else 0
+                    
+                            _pv_total = round(float(_target.get("pv_w") or 0) + float(_target.get("pv2_power_w") or 0), 1)
+                            _target["generation_power_w"] = _pv_total
+                            _target["c_generation_power_w"] = _pv_total
+                    
+                            _load_w = float(_target.get("load_w") or _target.get("c_load_w") or 0)
+                            _charge_w = float(_target.get("c_battery_charge_power_w") or 0)
+                            _discharge_w = float(_target.get("c_battery_discharge_power_w") or 0)
+                    
+                            _grid_w = round(max(_load_w + _charge_w - _pv_total - _discharge_w, 0), 1)
+                            _target["c_grid_import_power_w"] = _grid_w
+                            _target["mains_power_w"] = _grid_w
+                            _target["c_mains_power_w"] = _grid_w
+                    
+                            if _target.get("bat_cap") is not None:
+                                _target["bms_current_soc"] = _target.get("bat_cap")
+                    
+                            _status = str(_target.get("battery_status") or "").lower()
+                            _dischg_current = float(_target.get("dischg_current") or 0)
+                    
+                            if _discharge_w > 0 or _dischg_current > 0 or "discharge" in _status:
+                                _mode = "Battery Discharging"
+                            elif _charge_w > 0 and _pv_total > 0 and _grid_w > 0:
+                                _mode = "Solar + Grid Charging"
+                            elif _charge_w > 0 and _pv_total > 0:
+                                _mode = "Solar Charging"
+                            elif _grid_w > 0:
+                                _mode = "Grid Import"
+                            elif _pv_total > 0:
+                                _mode = "Solar"
+                            else:
+                                _mode = "Idle"
+                    
+                            _target["mode"] = _mode
+                            _target["working_mode"] = _mode
+                    
+                    except Exception:
+                        pass
+                    try:
+                        import base64 as _v19_b64
+                        import json as _v19_json
+                    
+                        def _v19_regs_le(_co):
+                            if not _co:
+                                return []
+                            _raw = _v19_b64.b64decode(_co)
+                            if len(_raw) < 5:
+                                return []
+                            if _raw[1] == 0x03:
+                                _bc = _raw[2]
+                                _data = _raw[3:3 + _bc]
+                            else:
+                                _data = _raw[3:-2]
+                            _regs = []
+                            for _i in range(0, len(_data) - 1, 2):
+                                _regs.append(_data[_i] | (_data[_i + 1] << 8))
+                            return _regs
+                    
+                        def _v19_collect_blocks(_v, _depth=0):
+                            if _depth > 4:
+                                return {}
+                            _found = {}
+                    
+                            if isinstance(_v, dict):
+                                if isinstance(_v.get("cn"), str) and isinstance(_v.get("co"), str):
+                                    _found[_v.get("cn")] = _v.get("co")
+                    
+                                _b = _v.get("b")
+                                if isinstance(_b, dict) and isinstance(_b.get("ct"), list):
+                                    for _it in _b.get("ct"):
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                                _ct = _v.get("ct")
+                                if isinstance(_ct, list):
+                                    for _it in _ct:
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                                for _k, _val in _v.items():
+                                    if _k in ("PS4Z", "Sgx0", "hIg6", "zsui") and isinstance(_val, str):
+                                        _found[_k] = _val
+                                    elif isinstance(_val, (dict, list, tuple)) and _depth < 3:
+                                        _found.update(_v19_collect_blocks(_val, _depth + 1))
+                    
+                            elif isinstance(_v, (list, tuple)):
+                                if len(_v) == 2 and isinstance(_v[0], str) and isinstance(_v[1], str):
+                                    if _v[0] in ("PS4Z", "Sgx0", "hIg6", "zsui"):
+                                        _found[_v[0]] = _v[1]
+                                for _it in _v:
+                                    if isinstance(_it, (dict, list, tuple)) and _depth < 3:
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                            elif isinstance(_v, (str, bytes, bytearray)):
+                                if isinstance(_v, (bytes, bytearray)):
+                                    _s = _v.decode("utf-8", "ignore")
+                                else:
+                                    _s = _v
+                    
+                                if '"ct"' in _s and '"co"' in _s:
+                                    _pos = _s.find("{")
+                                    while _pos >= 0:
+                                        try:
+                                            _obj, _end = _v19_json.JSONDecoder().raw_decode(_s[_pos:])
+                                            _found.update(_v19_collect_blocks(_obj, _depth + 1))
+                                            break
+                                        except Exception:
+                                            _pos = _s.find("{", _pos + 1)
+                    
+                            return _found
+                    
+                        # Find the dict that is going to be printed/published as CLEAN STATE
+                        _target = None
+                        for _name, _val in list(locals().items()):
+                            if isinstance(_val, dict):
+                                _keys = set(_val.keys())
+                                if (
+                                    "c_grid_import_power_w" in _keys
+                                    and ("pv_w" in _keys or "generation_power_w" in _keys)
+                                    and ("load_w" in _keys or "c_load_w" in _keys)
+                                ):
+                                    _target = _val
+                                    break
+                    
+                        if _target is not None:
+                            _blocks = {}
+                            for _name, _val in list(locals().items()):
+                                _blocks.update(_v19_collect_blocks(_val))
+                    
+                            _ps4z = _v19_regs_le(_blocks.get("PS4Z"))
+                            _sgx0 = _v19_regs_le(_blocks.get("Sgx0"))
+                    
+                            # Confirmed app mapping:
+                            # PV1 Power = PS4Z r[4]
+                            # PV2 Power = Sgx0 r[28]
+                            if len(_ps4z) > 4:
+                                _pv1_v = round(float(_ps4z[3]) / 10.0, 1)
+                                _pv1_w = float(_ps4z[4])
+                                if 0 <= _pv1_v <= 600 and 0 <= _pv1_w <= 10000:
+                                    _target["pv_v"] = _pv1_v
+                                    _target["pv_w"] = round(_pv1_w, 1)
+                                    _target["pv_current_a"] = round(_pv1_w / _pv1_v, 2) if _pv1_v > 0 else 0
+                    
+                            if len(_sgx0) > 28:
+                                _pv2_v = round(float(_sgx0[27]) / 10.0, 1)
+                                _pv2_w = float(_sgx0[28])
+                                if 0 <= _pv2_v <= 600 and 0 <= _pv2_w <= 10000:
+                                    _target["pv2_v"] = _pv2_v
+                                    _target["pv2_power_w"] = round(_pv2_w, 1)
+                                    _target["pv2_current_a"] = round(_pv2_w / _pv2_v, 2) if _pv2_v > 0 else 0
+                    
+                            _pv_total = round(float(_target.get("pv_w") or 0) + float(_target.get("pv2_power_w") or 0), 1)
+                            _target["generation_power_w"] = _pv_total
+                            _target["c_generation_power_w"] = _pv_total
+                    
+                            _load_w = float(_target.get("load_w") or _target.get("c_load_w") or 0)
+                            _charge_w = float(_target.get("c_battery_charge_power_w") or 0)
+                            _discharge_w = float(_target.get("c_battery_discharge_power_w") or 0)
+                    
+                            _grid_w = round(max(_load_w + _charge_w - _pv_total - _discharge_w, 0), 1)
+                            _target["c_grid_import_power_w"] = _grid_w
+                            _target["mains_power_w"] = _grid_w
+                            _target["c_mains_power_w"] = _grid_w
+                    
+                            if _target.get("bat_cap") is not None:
+                                _target["bms_current_soc"] = _target.get("bat_cap")
+                    
+                            _status = str(_target.get("battery_status") or "").lower()
+                            _dischg_current = float(_target.get("dischg_current") or 0)
+                    
+                            if _discharge_w > 0 or _dischg_current > 0 or "discharge" in _status:
+                                _mode = "Battery Discharging"
+                            elif _charge_w > 0 and _pv_total > 0 and _grid_w > 0:
+                                _mode = "Solar + Grid Charging"
+                            elif _charge_w > 0 and _pv_total > 0:
+                                _mode = "Solar Charging"
+                            elif _grid_w > 0:
+                                _mode = "Grid Import"
+                            elif _pv_total > 0:
+                                _mode = "Solar"
+                            else:
+                                _mode = "Idle"
+                    
+                            _target["mode"] = _mode
+                            _target["working_mode"] = _mode
+                    
+                    except Exception:
+                        pass
+
+
+                    # PS4Z_V19_FIX_AT_CLEAN_STATE: correct PV/Grid at clean-state publish scope
+                    try:
+                        import base64 as _v19_b64
+                        import json as _v19_json
+                    
+                        def _v19_regs_le(_co):
+                            if not _co:
+                                return []
+                            _raw = _v19_b64.b64decode(_co)
+                            if len(_raw) < 5:
+                                return []
+                            if _raw[1] == 0x03:
+                                _bc = _raw[2]
+                                _data = _raw[3:3 + _bc]
+                            else:
+                                _data = _raw[3:-2]
+                            _regs = []
+                            for _i in range(0, len(_data) - 1, 2):
+                                _regs.append(_data[_i] | (_data[_i + 1] << 8))
+                            return _regs
+                    
+                        def _v19_collect_blocks(_v, _depth=0):
+                            if _depth > 4:
+                                return {}
+                            _found = {}
+                    
+                            if isinstance(_v, dict):
+                                if isinstance(_v.get("cn"), str) and isinstance(_v.get("co"), str):
+                                    _found[_v.get("cn")] = _v.get("co")
+                    
+                                _b = _v.get("b")
+                                if isinstance(_b, dict) and isinstance(_b.get("ct"), list):
+                                    for _it in _b.get("ct"):
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                                _ct = _v.get("ct")
+                                if isinstance(_ct, list):
+                                    for _it in _ct:
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                                for _k, _val in _v.items():
+                                    if _k in ("PS4Z", "Sgx0", "hIg6", "zsui") and isinstance(_val, str):
+                                        _found[_k] = _val
+                                    elif isinstance(_val, (dict, list, tuple)) and _depth < 3:
+                                        _found.update(_v19_collect_blocks(_val, _depth + 1))
+                    
+                            elif isinstance(_v, (list, tuple)):
+                                if len(_v) == 2 and isinstance(_v[0], str) and isinstance(_v[1], str):
+                                    if _v[0] in ("PS4Z", "Sgx0", "hIg6", "zsui"):
+                                        _found[_v[0]] = _v[1]
+                                for _it in _v:
+                                    if isinstance(_it, (dict, list, tuple)) and _depth < 3:
+                                        _found.update(_v19_collect_blocks(_it, _depth + 1))
+                    
+                            elif isinstance(_v, (str, bytes, bytearray)):
+                                if isinstance(_v, (bytes, bytearray)):
+                                    _s = _v.decode("utf-8", "ignore")
+                                else:
+                                    _s = _v
+                    
+                                if '"ct"' in _s and '"co"' in _s:
+                                    _pos = _s.find("{")
+                                    while _pos >= 0:
+                                        try:
+                                            _obj, _end = _v19_json.JSONDecoder().raw_decode(_s[_pos:])
+                                            _found.update(_v19_collect_blocks(_obj, _depth + 1))
+                                            break
+                                        except Exception:
+                                            _pos = _s.find("{", _pos + 1)
+                    
+                            return _found
+                    
+                        # Find the dict that is going to be printed/published as CLEAN STATE
+                        _target = None
+                        for _name, _val in list(locals().items()):
+                            if isinstance(_val, dict):
+                                _keys = set(_val.keys())
+                                if (
+                                    "c_grid_import_power_w" in _keys
+                                    and ("pv_w" in _keys or "generation_power_w" in _keys)
+                                    and ("load_w" in _keys or "c_load_w" in _keys)
+                                ):
+                                    _target = _val
+                                    break
+                    
+                        if _target is not None:
+                            _blocks = {}
+                            for _name, _val in list(locals().items()):
+                                _blocks.update(_v19_collect_blocks(_val))
+                    
+                            _ps4z = _v19_regs_le(_blocks.get("PS4Z"))
+                            _sgx0 = _v19_regs_le(_blocks.get("Sgx0"))
+                    
+                            # Confirmed app mapping:
+                            # PV1 Power = PS4Z r[4]
+                            # PV2 Power = Sgx0 r[28]
+                            if len(_ps4z) > 4:
+                                _pv1_v = round(float(_ps4z[3]) / 10.0, 1)
+                                _pv1_w = float(_ps4z[4])
+                                if 0 <= _pv1_v <= 600 and 0 <= _pv1_w <= 10000:
+                                    _target["pv_v"] = _pv1_v
+                                    _target["pv_w"] = round(_pv1_w, 1)
+                                    _target["pv_current_a"] = round(_pv1_w / _pv1_v, 2) if _pv1_v > 0 else 0
+                    
+                            if len(_sgx0) > 28:
+                                _pv2_v = round(float(_sgx0[27]) / 10.0, 1)
+                                _pv2_w = float(_sgx0[28])
+                                if 0 <= _pv2_v <= 600 and 0 <= _pv2_w <= 10000:
+                                    _target["pv2_v"] = _pv2_v
+                                    _target["pv2_power_w"] = round(_pv2_w, 1)
+                                    _target["pv2_current_a"] = round(_pv2_w / _pv2_v, 2) if _pv2_v > 0 else 0
+                    
+                            _pv_total = round(float(_target.get("pv_w") or 0) + float(_target.get("pv2_power_w") or 0), 1)
+                            _target["generation_power_w"] = _pv_total
+                            _target["c_generation_power_w"] = _pv_total
+                    
+                            _load_w = float(_target.get("load_w") or _target.get("c_load_w") or 0)
+                            _charge_w = float(_target.get("c_battery_charge_power_w") or 0)
+                            _discharge_w = float(_target.get("c_battery_discharge_power_w") or 0)
+                    
+                            _grid_w = round(max(_load_w + _charge_w - _pv_total - _discharge_w, 0), 1)
+                            _target["c_grid_import_power_w"] = _grid_w
+                            _target["mains_power_w"] = _grid_w
+                            _target["c_mains_power_w"] = _grid_w
+                    
+                            if _target.get("bat_cap") is not None:
+                                _target["bms_current_soc"] = _target.get("bat_cap")
+                    
+                            _status = str(_target.get("battery_status") or "").lower()
+                            _dischg_current = float(_target.get("dischg_current") or 0)
+                    
+                            if _discharge_w > 0 or _dischg_current > 0 or "discharge" in _status:
+                                _mode = "Battery Discharging"
+                            elif _charge_w > 0 and _pv_total > 0 and _grid_w > 0:
+                                _mode = "Solar + Grid Charging"
+                            elif _charge_w > 0 and _pv_total > 0:
+                                _mode = "Solar Charging"
+                            elif _grid_w > 0:
+                                _mode = "Grid Import"
+                            elif _pv_total > 0:
+                                _mode = "Solar"
+                            else:
+                                _mode = "Idle"
+                    
+                            _target["mode"] = _mode
+                            _target["working_mode"] = _mode
+                    
+                    except Exception:
+                        pass
+
                     log_kv("[CLEAN STATE]", topic=source_topic, values=clean_state)
 
                 _shared_state.LAST_STATE.update(clean_state)
