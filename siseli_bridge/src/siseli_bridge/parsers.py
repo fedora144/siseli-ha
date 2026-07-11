@@ -581,6 +581,169 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
+    # PS4Z_V11_FINAL_PV_GRID_OVERRIDE: final correction for PV1/PV2 and Grid Import
+
+
+
+    try:
+
+
+
+        # Current parser state before this override:
+
+
+
+        # - pv2_power_w is the real PV1 power from the app
+
+
+
+        # - generation_power_w is the total PV generation
+
+
+
+        # - pv_w may be wrong because older patch calculated V * pseudo-current
+
+
+
+        pv_total = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
+
+
+
+        pv1_w = float(out.get("pv2_power_w") or 0)
+
+
+
+
+        if pv_total > 0 and pv1_w >= 0:
+
+
+
+            pv2_w = max(pv_total - pv1_w, 0)
+
+
+
+
+            pv1_v = float(out.get("pv2_v") or out.get("pv_v") or 0)
+
+
+
+            pv2_v = float(out.get("pv_v") or out.get("pv2_v") or 0)
+
+
+
+
+            out["pv_w"] = round(pv1_w, 1)
+
+
+
+            out["pv_v"] = round(pv1_v, 1) if pv1_v > 0 else 0
+
+
+
+            out["pv_current_a"] = round(pv1_w / pv1_v, 2) if pv1_v > 0 else 0
+
+
+
+
+            out["pv2_power_w"] = round(pv2_w, 1)
+
+
+
+            out["pv2_v"] = round(pv2_v, 1) if pv2_v > 0 else 0
+
+
+
+            out["pv2_current_a"] = round(pv2_w / pv2_v, 2) if pv2_v > 0 else 0
+
+
+
+
+            out["generation_power_w"] = round(pv_total, 1)
+
+
+
+            out["c_generation_power_w"] = round(pv_total, 1)
+
+
+
+
+        # Grid import fallback after PV correction
+
+
+
+        load_w_now = float(out.get("load_w") or out.get("c_load_w") or 0)
+
+
+
+        pv_w_now = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
+
+
+
+        batt_charge_w_now = float(out.get("c_battery_charge_power_w") or 0)
+
+
+
+        batt_discharge_w_now = float(out.get("c_battery_discharge_power_w") or 0)
+
+
+
+
+        calc_grid_w = load_w_now + batt_charge_w_now - pv_w_now - batt_discharge_w_now
+
+
+
+        calc_grid_w = round(max(calc_grid_w, 0), 1)
+
+
+
+
+        out["c_grid_import_power_w"] = calc_grid_w
+
+
+
+        out["mains_power_w"] = calc_grid_w
+
+
+
+        out["c_mains_power_w"] = calc_grid_w
+
+
+
+
+        if calc_grid_w > 0:
+
+
+
+            out["mains_flow_state"] = "Import"
+
+
+
+            out["mains_current_flow_direction"] = "Import"
+
+
+
+        else:
+
+
+
+            out["mains_flow_state"] = "Idle"
+
+
+
+            out["mains_current_flow_direction"] = "Idle"
+
+
+
+    except Exception:
+
+
+
+        pass
+
+
+
+
     return out
 
 
