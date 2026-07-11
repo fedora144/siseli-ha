@@ -500,89 +500,10 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-    # PS4Z_V9_GRID_IMPORT_FALLBACK: calculate grid import when inverter does not provide it directly
 
 
-    try:
+    # PS4Z_V12_APP_MATCH_PV_GRID_OVERRIDE: app-matched PV1/PV2 and grid import correction
 
-
-        load_w_now = float(out.get("load_w") or out.get("c_load_w") or 0)
-
-
-        pv_w_now = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
-
-
-        batt_charge_w_now = float(out.get("c_battery_charge_power_w") or 0)
-
-
-        batt_discharge_w_now = float(out.get("c_battery_discharge_power_w") or 0)
-
-
-        direct_grid_w = float(out.get("c_grid_import_power_w") or 0)
-
-
-
-        calc_grid_w = load_w_now + batt_charge_w_now - pv_w_now - batt_discharge_w_now
-
-
-        calc_grid_w = round(max(calc_grid_w, 0), 1)
-
-
-
-        if direct_grid_w <= 0 and calc_grid_w > 0:
-
-
-            set_if_ok("c_grid_import_power_w", calc_grid_w, 0, 60000)
-
-
-            set_if_ok("mains_power_w", calc_grid_w, 0, 60000)
-
-
-            set_if_ok("c_mains_power_w", calc_grid_w, 0, 60000)
-
-
-            out["mains_flow_state"] = "Import"
-
-
-            out["mains_current_flow_direction"] = "Import"
-
-
-        elif direct_grid_w > 0:
-
-
-            set_if_ok("mains_power_w", direct_grid_w, 0, 60000)
-
-
-            set_if_ok("c_mains_power_w", direct_grid_w, 0, 60000)
-
-
-            out["mains_flow_state"] = "Import"
-
-
-            out["mains_current_flow_direction"] = "Import"
-
-
-        else:
-
-
-            set_if_ok("c_grid_import_power_w", 0, 0, 60000)
-
-
-            set_if_ok("mains_power_w", 0, 0, 60000)
-
-
-            set_if_ok("c_mains_power_w", 0, 0, 60000)
-
-
-    except Exception:
-
-
-        pass
-
-
-
-
-    # PS4Z_V11_FINAL_PV_GRID_OVERRIDE: final correction for PV1/PV2 and Grid Import
 
 
 
@@ -590,23 +511,29 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-        # Current parser state before this override:
+
+        # Known from app comparison:
 
 
 
-        # - pv2_power_w is the real PV1 power from the app
+
+        # - current out["pv2_power_w"] is actually PV1 power
 
 
 
-        # - generation_power_w is the total PV generation
+
+        # - current out["pv_w"] is old/wrong calculated PV value
 
 
 
-        # - pv_w may be wrong because older patch calculated V * pseudo-current
+
+        # - current generation_power_w sometimes represents old_pv_wrong + real PV2
 
 
 
-        pv_total = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
+
+        old_pv_wrong = float(out.get("pv_w") or 0)
+
 
 
 
@@ -615,11 +542,112 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-        if pv_total > 0 and pv1_w >= 0:
+        gen_raw = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
 
 
 
-            pv2_w = max(pv_total - pv1_w, 0)
+
+    
+
+
+
+
+        if pv1_w > 0:
+
+
+
+
+            pv2_w = 0.0
+
+
+
+
+    
+
+
+
+
+            # Candidate 1: matches 07:33 case
+
+
+
+
+            cand_from_wrong = gen_raw - old_pv_wrong
+
+
+
+
+    
+
+
+
+
+            # Candidate 2: matches cases where total already means PV1+PV2
+
+
+
+
+            cand_from_total = gen_raw - pv1_w
+
+
+
+
+    
+
+
+
+
+            # PV2 must normally be higher than PV1 on this installation.
+
+
+
+
+            if gen_raw > 0 and cand_from_wrong > pv1_w:
+
+
+
+
+                pv2_w = cand_from_wrong
+
+
+
+
+            elif gen_raw > 0 and cand_from_total > 0:
+
+
+
+
+                pv2_w = cand_from_total
+
+
+
+
+            else:
+
+
+
+
+                pv2_w = max(old_pv_wrong - pv1_w, 0)
+
+
+
+
+    
+
+
+
+
+            pv2_w = round(max(pv2_w, 0), 1)
+
+
+
+
+            pv_total = round(pv1_w + pv2_w, 1)
+
+
+
+
+    
 
 
 
@@ -628,7 +656,13 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
             pv2_v = float(out.get("pv_v") or out.get("pv2_v") or 0)
+
+
+
+
+    
 
 
 
@@ -637,7 +671,9 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
             out["pv_v"] = round(pv1_v, 1) if pv1_v > 0 else 0
+
 
 
 
@@ -646,11 +682,18 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-            out["pv2_power_w"] = round(pv2_w, 1)
+    
+
+
+
+
+            out["pv2_power_w"] = pv2_w
+
 
 
 
             out["pv2_v"] = round(pv2_v, 1) if pv2_v > 0 else 0
+
 
 
 
@@ -659,16 +702,28 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-            out["generation_power_w"] = round(pv_total, 1)
-
-
-
-            out["c_generation_power_w"] = round(pv_total, 1)
+    
 
 
 
 
-        # Grid import fallback after PV correction
+            out["generation_power_w"] = pv_total
+
+
+
+
+            out["c_generation_power_w"] = pv_total
+
+
+
+
+    
+
+
+
+
+        # Recalculate grid import after PV correction
+
 
 
 
@@ -676,11 +731,14 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-        pv_w_now = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
+
+        pv_total_now = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
+
 
 
 
         batt_charge_w_now = float(out.get("c_battery_charge_power_w") or 0)
+
 
 
 
@@ -689,29 +747,48 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-        calc_grid_w = load_w_now + batt_charge_w_now - pv_w_now - batt_discharge_w_now
-
-
-
-        calc_grid_w = round(max(calc_grid_w, 0), 1)
+    
 
 
 
 
-        out["c_grid_import_power_w"] = calc_grid_w
-
-
-
-        out["mains_power_w"] = calc_grid_w
-
-
-
-        out["c_mains_power_w"] = calc_grid_w
+        grid_import_w = load_w_now + batt_charge_w_now - pv_total_now - batt_discharge_w_now
 
 
 
 
-        if calc_grid_w > 0:
+        grid_import_w = round(max(grid_import_w, 0), 1)
+
+
+
+
+    
+
+
+
+
+        out["c_grid_import_power_w"] = grid_import_w
+
+
+
+
+        out["mains_power_w"] = grid_import_w
+
+
+
+
+        out["c_mains_power_w"] = grid_import_w
+
+
+
+
+    
+
+
+
+
+        if grid_import_w > 0:
+
 
 
 
@@ -719,7 +796,9 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
             out["mains_current_flow_direction"] = "Import"
+
 
 
 
@@ -727,7 +806,9 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
             out["mains_flow_state"] = "Idle"
+
 
 
 
@@ -735,11 +816,19 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
+    
+
+
+
+
     except Exception:
 
 
 
+
         pass
+
 
 
 
