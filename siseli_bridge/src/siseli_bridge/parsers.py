@@ -1378,6 +1378,217 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
+    # PS4Z_V20_SKIP_RPC_REPLY_STATE: do not let RPC replies overwrite telemetry sensors
+
+
+
+
+
+
+
+
+
+
+    try:
+
+
+
+
+
+
+
+
+
+
+        _topic_text = ""
+
+
+
+
+
+
+
+
+
+
+        for _name, _val in list(locals().items()):
+
+
+
+
+
+
+
+
+
+
+            if _name.lower() == "topic" and isinstance(_val, str):
+
+
+
+
+
+
+
+
+
+
+                _topic_text = _val
+
+
+
+
+
+
+
+
+
+
+                break
+
+
+
+
+
+
+
+
+
+
+        if not _topic_text:
+
+
+
+
+
+
+
+
+
+
+            for _val in list(locals().values()):
+
+
+
+
+
+
+
+
+
+
+                if isinstance(_val, str) and "dev_rpc_reply" in _val:
+
+
+
+
+
+
+
+
+
+
+                    _topic_text = _val
+
+
+
+
+
+
+
+
+
+
+                    break
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+        if "dev_rpc_reply" in _topic_text:
+
+
+
+
+
+
+
+
+
+
+            # RPC reply is only an ACK/setting response, not full telemetry.
+
+
+
+
+
+
+
+
+
+
+            # Returning empty prevents stale/partial PV/Grid values from overwriting HA state.
+
+
+
+
+
+
+
+
+
+
+            out = {}
+
+
+
+
+
+
+
+
+
+
+    except Exception:
+
+
+
+
+
+
+
+
+
+
+        pass
+
+
+
+
+
+
+
+
+
+
+
     return out
 
 
