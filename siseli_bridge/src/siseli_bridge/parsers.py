@@ -502,7 +502,11 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-    # PS4Z_V12_APP_MATCH_PV_GRID_OVERRIDE: app-matched PV1/PV2 and grid import correction
+
+
+    # PS4Z_V15_DIRECT_RAW_PV_MAPPING: direct PV1/PV2 mapping from raw PS4Z/Sgx0 base64 blocks
+
+
 
 
 
@@ -512,37 +516,18 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-        # Known from app comparison:
+
+
+        import base64 as _ps4z_b64
 
 
 
 
-        # - current out["pv2_power_w"] is actually PV1 power
 
 
+        import json as _ps4z_json
 
 
-        # - current out["pv_w"] is old/wrong calculated PV value
-
-
-
-
-        # - current generation_power_w sometimes represents old_pv_wrong + real PV2
-
-
-
-
-        old_pv_wrong = float(out.get("pv_w") or 0)
-
-
-
-
-        pv1_w = float(out.get("pv2_power_w") or 0)
-
-
-
-
-        gen_raw = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
 
 
 
@@ -552,12 +537,53 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-        if pv1_w > 0:
+
+
+        def _ps4z_find_payload_obj():
 
 
 
 
-            pv2_w = 0.0
+
+
+            # First try dict objects already parsed in local scope
+
+
+
+
+
+
+            for _v in list(locals().values()):
+
+
+
+
+
+
+                if isinstance(_v, dict):
+
+
+
+
+
+
+                    _b = _v.get("b")
+
+
+
+
+
+
+                    if isinstance(_b, dict) and isinstance(_b.get("ct"), list):
+
+
+
+
+
+
+                        return _v
+
+
 
 
 
@@ -567,12 +593,60 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-            # Candidate 1: matches 07:33 case
+
+
+            # Then try string/bytes payload variables in local scope
 
 
 
 
-            cand_from_wrong = gen_raw - old_pv_wrong
+
+
+            for _v in list(locals().values()):
+
+
+
+
+
+
+                if isinstance(_v, (bytes, bytearray)):
+
+
+
+
+
+
+                    _s = _v.decode("utf-8", "ignore")
+
+
+
+
+
+
+                elif isinstance(_v, str):
+
+
+
+
+
+
+                    _s = _v
+
+
+
+
+
+
+                else:
+
+
+
+
+
+
+                    continue
+
+
 
 
 
@@ -582,12 +656,18 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-            # Candidate 2: matches cases where total already means PV1+PV2
+
+
+                if '"ct"' not in _s or '"co"' not in _s:
 
 
 
 
-            cand_from_total = gen_raw - pv1_w
+
+
+                    continue
+
+
 
 
 
@@ -597,27 +677,172 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-            # PV2 must normally be higher than PV1 on this installation.
+
+
+    
 
 
 
 
-            if gen_raw > 0 and cand_from_wrong > pv1_w:
+
+
+                _pos = _s.find("{")
 
 
 
 
-                pv2_w = cand_from_wrong
+
+
+                while _pos >= 0:
 
 
 
 
-            elif gen_raw > 0 and cand_from_total > 0:
+
+
+                    _candidate = _s[_pos:]
 
 
 
 
-                pv2_w = cand_from_total
+
+
+                    try:
+
+
+
+
+
+
+                        return _ps4z_json.loads(_candidate)
+
+
+
+
+
+
+                    except Exception:
+
+
+
+
+
+
+                        try:
+
+
+
+
+
+
+                            _obj, _end = _ps4z_json.JSONDecoder().raw_decode(_candidate)
+
+
+
+
+
+
+                            return _obj
+
+
+
+
+
+
+                        except Exception:
+
+
+
+
+
+
+                            _pos = _s.find("{", _pos + 1)
+
+
+
+
+
+
+            return None
+
+
+
+
+
+
+    
+
+
+
+
+
+
+        def _ps4z_regs_le(_co):
+
+
+
+
+
+
+            if not _co:
+
+
+
+
+
+
+                return []
+
+
+
+
+
+
+            _raw = _ps4z_b64.b64decode(_co)
+
+
+
+
+
+
+            if len(_raw) < 5:
+
+
+
+
+
+
+                return []
+
+
+
+
+
+
+            # Modbus response: slave, function, byte_count, data..., crc_lo, crc_hi
+
+
+
+
+
+
+            if _raw[1] == 0x03:
+
+
+
+
+
+
+                _byte_count = _raw[2]
+
+
+
+
+
+
+                _data = _raw[3:3 + _byte_count]
+
+
 
 
 
@@ -627,22 +852,11 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-                pv2_w = max(old_pv_wrong - pv1_w, 0)
 
 
+                _data = _raw[3:-2]
 
 
-    
-
-
-
-
-            pv2_w = round(max(pv2_w, 0), 1)
-
-
-
-
-            pv_total = round(pv1_w + pv2_w, 1)
 
 
 
@@ -652,52 +866,39 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-            pv1_v = float(out.get("pv2_v") or out.get("pv_v") or 0)
+
+
+            _regs = []
 
 
 
 
-            pv2_v = float(out.get("pv_v") or out.get("pv2_v") or 0)
+
+
+            for _i in range(0, len(_data) - 1, 2):
 
 
 
 
-    
+
+
+                # This inverter block is little-endian per register
 
 
 
 
-            out["pv_w"] = round(pv1_w, 1)
+
+
+                _regs.append(_data[_i] | (_data[_i + 1] << 8))
 
 
 
 
-            out["pv_v"] = round(pv1_v, 1) if pv1_v > 0 else 0
 
 
+            return _regs
 
 
-            out["pv_current_a"] = round(pv1_w / pv1_v, 2) if pv1_v > 0 else 0
-
-
-
-
-    
-
-
-
-
-            out["pv2_power_w"] = pv2_w
-
-
-
-
-            out["pv2_v"] = round(pv2_v, 1) if pv2_v > 0 else 0
-
-
-
-
-            out["pv2_current_a"] = round(pv2_w / pv2_v, 2) if pv2_v > 0 else 0
 
 
 
@@ -707,77 +908,74 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-            out["generation_power_w"] = pv_total
+
+
+        _obj = _ps4z_find_payload_obj()
 
 
 
 
-            out["c_generation_power_w"] = pv_total
+
+
+        if _obj:
 
 
 
 
-    
+
+
+            _ct = (_obj.get("b") or {}).get("ct") or []
 
 
 
 
-        # Recalculate grid import after PV correction
+
+
+            _blocks = {}
 
 
 
 
-        load_w_now = float(out.get("load_w") or out.get("c_load_w") or 0)
+
+
+            for _item in _ct:
 
 
 
 
-        pv_total_now = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
+
+
+                if isinstance(_item, dict):
 
 
 
 
-        batt_charge_w_now = float(out.get("c_battery_charge_power_w") or 0)
+
+
+                    _cn = _item.get("cn")
 
 
 
 
-        batt_discharge_w_now = float(out.get("c_battery_discharge_power_w") or 0)
+
+
+                    _co = _item.get("co")
 
 
 
 
-    
+
+
+                    if _cn and _co:
 
 
 
 
-        grid_import_w = load_w_now + batt_charge_w_now - pv_total_now - batt_discharge_w_now
 
 
+                        _blocks[_cn] = _co
 
 
-        grid_import_w = round(max(grid_import_w, 0), 1)
-
-
-
-
-    
-
-
-
-
-        out["c_grid_import_power_w"] = grid_import_w
-
-
-
-
-        out["mains_power_w"] = grid_import_w
-
-
-
-
-        out["c_mains_power_w"] = grid_import_w
 
 
 
@@ -787,7 +985,445 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
-        if grid_import_w > 0:
+
+
+            _ps4z = _ps4z_regs_le(_blocks.get("PS4Z"))
+
+
+
+
+
+
+            _sgx0 = _ps4z_regs_le(_blocks.get("Sgx0"))
+
+
+
+
+
+
+    
+
+
+
+
+
+
+            _pv1_v = None
+
+
+
+
+
+
+            _pv1_w = None
+
+
+
+
+
+
+            _pv2_v = None
+
+
+
+
+
+
+            _pv2_w = None
+
+
+
+
+
+
+    
+
+
+
+
+
+
+            # PS4Z registers:
+
+
+
+
+
+
+            # r[3] = PV1 voltage x10
+
+
+
+
+
+
+            # r[4] = PV1 power W
+
+
+
+
+
+
+            if len(_ps4z) > 4:
+
+
+
+
+
+
+                _pv1_v = round(float(_ps4z[3]) / 10.0, 1)
+
+
+
+
+
+
+                _pv1_w = float(_ps4z[4])
+
+
+
+
+
+
+    
+
+
+
+
+
+
+            # Sgx0 registers:
+
+
+
+
+
+
+            # r[27] = PV2 voltage x10
+
+
+
+
+
+
+            # r[28] = PV2 power W
+
+
+
+
+
+
+            if len(_sgx0) > 28:
+
+
+
+
+
+
+                _pv2_v = round(float(_sgx0[27]) / 10.0, 1)
+
+
+
+
+
+
+                _pv2_w = float(_sgx0[28])
+
+
+
+
+
+
+    
+
+
+
+
+
+
+            # Sanity limits
+
+
+
+
+
+
+            if _pv1_v is not None and not (0 <= _pv1_v <= 600):
+
+
+
+
+
+
+                _pv1_v = None
+
+
+
+
+
+
+            if _pv2_v is not None and not (0 <= _pv2_v <= 600):
+
+
+
+
+
+
+                _pv2_v = None
+
+
+
+
+
+
+            if _pv1_w is not None and not (0 <= _pv1_w <= 10000):
+
+
+
+
+
+
+                _pv1_w = None
+
+
+
+
+
+
+            if _pv2_w is not None and not (0 <= _pv2_w <= 10000):
+
+
+
+
+
+
+                _pv2_w = None
+
+
+
+
+
+
+    
+
+
+
+
+
+
+            if _pv1_w is not None:
+
+
+
+
+
+
+                out["pv_w"] = round(_pv1_w, 1)
+
+
+
+
+
+
+                if _pv1_v is not None:
+
+
+
+
+
+
+                    out["pv_v"] = _pv1_v
+
+
+
+
+
+
+                    out["pv_current_a"] = round(_pv1_w / _pv1_v, 2) if _pv1_v > 0 else 0
+
+
+
+
+
+
+    
+
+
+
+
+
+
+            if _pv2_w is not None:
+
+
+
+
+
+
+                out["pv2_power_w"] = round(_pv2_w, 1)
+
+
+
+
+
+
+                if _pv2_v is not None:
+
+
+
+
+
+
+                    out["pv2_v"] = _pv2_v
+
+
+
+
+
+
+                    out["pv2_current_a"] = round(_pv2_w / _pv2_v, 2) if _pv2_v > 0 else 0
+
+
+
+
+
+
+    
+
+
+
+
+
+
+            _pv1_final = float(out.get("pv_w") or 0)
+
+
+
+
+
+
+            _pv2_final = float(out.get("pv2_power_w") or 0)
+
+
+
+
+
+
+            _pv_total = round(_pv1_final + _pv2_final, 1)
+
+
+
+
+
+
+    
+
+
+
+
+
+
+            out["generation_power_w"] = _pv_total
+
+
+
+
+
+
+            out["c_generation_power_w"] = _pv_total
+
+
+
+
+
+
+    
+
+
+
+
+
+
+        # Grid import recalculation after direct PV mapping
+
+
+
+
+
+
+        _load_w = float(out.get("load_w") or out.get("c_load_w") or 0)
+
+
+
+
+
+
+        _pv_total_now = float(out.get("generation_power_w") or out.get("c_generation_power_w") or 0)
+
+
+
+
+
+
+        _batt_chg_w = float(out.get("c_battery_charge_power_w") or 0)
+
+
+
+
+
+
+        _batt_dis_w = float(out.get("c_battery_discharge_power_w") or 0)
+
+
+
+
+
+
+    
+
+
+
+
+
+
+        _grid_import = round(max(_load_w + _batt_chg_w - _pv_total_now - _batt_dis_w, 0), 1)
+
+
+
+
+
+
+        out["c_grid_import_power_w"] = _grid_import
+
+
+
+
+
+
+        out["mains_power_w"] = _grid_import
+
+
+
+
+
+
+        out["c_mains_power_w"] = _grid_import
+
+
+
+
+
+
+    
+
+
+
+
+
+
+        if _grid_import > 0:
+
+
 
 
 
@@ -797,7 +1433,11 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
+
             out["mains_current_flow_direction"] = "Import"
+
+
 
 
 
@@ -807,7 +1447,11 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
+
             out["mains_flow_state"] = "Idle"
+
+
 
 
 
@@ -817,7 +1461,165 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
+
     
+
+
+
+
+
+
+        # BMS SOC / mode fallback
+
+
+
+
+
+
+        if out.get("bat_cap") is not None:
+
+
+
+
+
+
+            out["bms_current_soc"] = out.get("bat_cap")
+
+
+
+
+
+
+    
+
+
+
+
+
+
+        _charge_w = float(out.get("c_battery_charge_power_w") or 0)
+
+
+
+
+
+
+        _discharge_w = float(out.get("c_battery_discharge_power_w") or 0)
+
+
+
+
+
+
+        if _pv_total_now > 0 and _charge_w > 0 and _grid_import <= 0:
+
+
+
+
+
+
+            _mode = "Solar Charging"
+
+
+
+
+
+
+        elif _pv_total_now > 0 and _charge_w > 0 and _grid_import > 0:
+
+
+
+
+
+
+            _mode = "Solar + Grid Charging"
+
+
+
+
+
+
+        elif _discharge_w > 0:
+
+
+
+
+
+
+            _mode = "Battery Discharging"
+
+
+
+
+
+
+        elif _grid_import > 0:
+
+
+
+
+
+
+            _mode = "Grid Import"
+
+
+
+
+
+
+        elif _pv_total_now > 0:
+
+
+
+
+
+
+            _mode = "Solar"
+
+
+
+
+
+
+        else:
+
+
+
+
+
+
+            _mode = "Idle"
+
+
+
+
+
+
+    
+
+
+
+
+
+
+        out["mode"] = _mode
+
+
+
+
+
+
+        out["working_mode"] = _mode
+
+
+
+
+
+
+    
+
+
 
 
 
@@ -827,7 +1629,11 @@ def _quick_decode_ps4z_state(blocks: dict) -> dict:
 
 
 
+
+
         pass
+
+
 
 
 
