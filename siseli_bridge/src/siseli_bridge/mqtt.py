@@ -138,6 +138,14 @@ def publish_discovery() -> None:
         client.publish(availability_topic_for_group(group), "online", retain=True)
     _state.DISCOVERY_PUBLISHED = True
     log("[HA MQTT] Discovery published", level="info")
+    try:
+        from siseli_bridge.cloud_command import start_max_total_charge_command_sidecar
+    except Exception:
+        from .cloud_command import start_max_total_charge_command_sidecar
+    try:
+        start_max_total_charge_command_sidecar()
+    except Exception as _e:
+        print(f"[MAX CHG CMD] start failed: {_e}", flush=True)
 
 
 def publish_grouped_state(state_payload: Dict[str, object]) -> None:
