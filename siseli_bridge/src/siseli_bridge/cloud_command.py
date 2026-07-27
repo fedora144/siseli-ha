@@ -153,12 +153,13 @@ def _sidecar_thread():
 
     discovery_topic = "homeassistant/number/siseli_inverter_1/max_total_charge_current/config"
 
+    state_topic = f"{base_topic}/command/max_total_charge_current/state"
+
     discovery_payload = {
         "name": "Siseli Max Total Charge Current",
         "uniq_id": "siseli_inverter_1_max_total_charge_current",
         "cmd_t": command_topic,
-        "stat_t": os.getenv("STATE_TOPIC", "siseli/siseli_inverter_1/state"),
-        "val_tpl": "{{ value_json.max_chg }}",
+        "stat_t": state_topic,
         "min": 5,
         "max": 100,
         "step": 5,
@@ -177,18 +178,48 @@ def _sidecar_thread():
         _log(f"local mqtt connected rc={rc}")
         client.publish(discovery_topic, json.dumps(discovery_payload), qos=0, retain=True)
         client.subscribe(command_topic)
+
+        dtu_id = os.getenv("SISIELI_DTU_ID") or os.getenv("SISELI_DTU_ID") or os.getenv("DTU_ID") or "81520839086957145360"
+        reply_topic = f"dtu/{dtu_id}/pub/service/dev_rpc_reply"
+        client.subscribe(reply_topic)
+
         _log(f"subscribed {command_topic}")
+        _log(f"subscribed {reply_topic}")
 
     def on_message(client, userdata, msg):
         try:
-            raw = msg.payload.decode("utf-8", "ignore").strip()
-            amps = int(round(float(raw)))
-            _log(f"HA command received: {amps}A")
-            ok = publish_cloud_command(amps)
+            topic = msg.topic
+            raw = msg.payload.decode("utf-8", "ignore").lstrip("\x00").strip()
 
-            # Publish command echo to HA state helper topic.
-            echo_topic = f"{base_topic}/command/max_total_charge_current/result"
-            client.publish(echo_topic, json.dumps({"amps": amps, "ok": ok}), qos=0, retain=False)
+            # HA number command topic
+            if topic == command_topic:
+                amps = int(round(float(raw)))
+                _log(f"HA command received: {amps}A")
+                ok = publish_cloud_command(amps)
+
+                echo_topic = f"{base_topic}/command/max_total_charge_current/result"
+                client.publish(echo_topic, json.dumps({"amps": amps, "ok": ok}), qos=0, retain=False)
+                if ok:
+                    client.publish(state_topic, str(amps), qos=0, retain=True)
+                return
+
+            # Inverter RPC reply mirrored by bridge:
+            # {"c":5,...,"e":0,"b":{"co":"BQYTngAU7Ss="}}
+            if topic.endswith("/pub/service/dev_rpc_reply"):
+                try:
+                    obj = json.loads(raw)
+                    co = (((obj or {}).get("b") or {}).get("co") or "")
+                    if not co:
+                        return
+
+                    frame = base64.b64decode(co)
+                    if len(frame) >= 8 and frame[0] == 0x05 and frame[1] == 0x06 and frame[2] == 0x13 and frame[3] == 0x9E:
+                        amps = (frame[4] << 8) | frame[5]
+                        client.publish(state_topic, str(amps), qos=0, retain=True)
+                        _log(f"reply confirms Max Total Charge Current={amps}A co={co}")
+                except Exception as e:
+                    _log(f"reply parse ignored: {e}")
+                return
 
         except Exception as e:
             _log(f"command error: {e}")
