@@ -129,10 +129,14 @@ def publish_cloud_command(amps: int):
         client.connect(cloud_host, cloud_port, 10)
         client.loop_start()
 
-        info = client.publish(cloud_topic, payload_text, qos=0, retain=False)
+        # Solar of Thing / dongle payload has leading 0x00 before JSON.
+        # Captured payload starts with: 00 7b 22 ...
+        payload_bytes = b"\\x00" + payload_text.encode("utf-8")
+
+        info = client.publish(cloud_topic, payload_bytes, qos=0, retain=False)
         info.wait_for_publish(timeout=5)
 
-        _log(f"sent {amps}A co={co} topic={cloud_topic}")
+        _log(f"sent {amps}A co={co} topic={cloud_topic} payload_prefix=00")
 
         time.sleep(0.5)
         client.loop_stop()
