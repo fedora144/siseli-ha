@@ -275,6 +275,12 @@ if __name__ == "__main__":
     sniffer = AsyncSniffer(**sniff_kwargs)
     sniffer.start()
     log("[Bridge] Sniffer started", level="info")
+    # PS4Z_V53_INBOUND_DEBUG
+    try:
+        from siseli_bridge.inbound_debug import start_inbound_debug
+        start_inbound_debug()
+    except Exception as e:
+        print(f'[INBOUND DBG] start failed: {e}', flush=True)
 
     try:
         while RUNNING:
