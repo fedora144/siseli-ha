@@ -1,6 +1,6 @@
 name: 'Siseli Inverter Bridge PS4Z'
 description: 'Local bridge for Siseli-compatible inverters with MQTT discovery for Home Assistant.'
-version: '2.5.50'
+version: '2.5.51'
 slug: 'siseli_bridge_ps4z'
 url: 'https://github.com/fedora144/siseli-ha/blob/main/README.md'
 init: false
@@ -18,6 +18,8 @@ privileged:
 apparmor: false
 
 options:
+  MQTT_USERNAME: ""
+  MQTT_PASSWORD: ""
   MQTT_HOST: 'core-mosquitto'
   MQTT_PORT: 1883
   MQTT_USER: ''
@@ -52,6 +54,8 @@ options:
   MQTT_RETAIN: true
 
 schema:
+  MQTT_USERNAME: str?
+  MQTT_PASSWORD: str?
   MQTT_HOST: str
   MQTT_PORT: int
   MQTT_USER: str?

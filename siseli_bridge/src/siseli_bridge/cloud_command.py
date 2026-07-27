@@ -20,6 +20,28 @@ def _log(msg):
     print(f"[MAX CHG CMD] {msg}", flush=True)
 
 
+
+
+def _addon_options():
+    try:
+        with open("/data/options.json", "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _get_opt(*names, default=""):
+    opts = _addon_options()
+    for name in names:
+        val = os.getenv(name)
+        if val not in (None, ""):
+            return val
+        val = opts.get(name)
+        if val not in (None, ""):
+            return val
+    return default
+
+
 def _rand_token(n=8):
     chars = string.ascii_letters + string.digits
     return "".join(random.choice(chars) for _ in range(n))
@@ -145,8 +167,10 @@ def start_max_total_charge_command_sidecar():
 
 
 def _sidecar_thread():
-    local_host = os.getenv("MQTT_HOST", "core-mosquitto")
-    local_port = int(os.getenv("MQTT_PORT", "1883"))
+    local_host = _get_opt("MQTT_HOST", default="core-mosquitto")
+    local_port = int(_get_opt("MQTT_PORT", default="1883"))
+    local_user = _get_opt("MQTT_USERNAME", "MQTT_USER", default="")
+    local_pass = _get_opt("MQTT_PASSWORD", "MQTT_PASS", default="")
 
     base_topic = os.getenv("STATE_TOPIC", "siseli/siseli_inverter_1/state").rsplit("/", 1)[0]
     command_topic = f"{base_topic}/command/max_total_charge_current/set"
@@ -176,6 +200,9 @@ def _sidecar_thread():
 
     def on_connect(client, userdata, flags, rc):
         _log(f"local mqtt connected rc={rc}")
+        if rc != 0:
+            _log("local mqtt connect failed. Check MQTT_USERNAME / MQTT_PASSWORD in add-on configuration.")
+            return
         client.publish(discovery_topic, json.dumps(discovery_payload), qos=0, retain=True)
         client.subscribe(command_topic)
 
@@ -229,6 +256,12 @@ def _sidecar_thread():
             client = mqtt.Client(client_id=f"siseli_maxchg_sidecar_{_rand_token(5)}", clean_session=True)
             client.on_connect = on_connect
             client.on_message = on_message
+
+            if local_user:
+                client.username_pw_set(local_user, local_pass)
+                _log(f"local mqtt auth enabled user={local_user}")
+            else:
+                _log("local mqtt auth disabled")
 
             _log(f"local mqtt connect {local_host}:{local_port}")
             client.connect(local_host, local_port, 30)
